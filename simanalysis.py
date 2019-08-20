@@ -4,6 +4,9 @@ import sys
 from konlpy.tag import Kkma
 from konlpy.utils import pprint
 from konlpy.tag import Twitter
+
+import multiprocessing
+
 '''
 CREATE TABLE simanalysis( id char(10) NOT NULL, token text(65535), sim1_id char(10), sim2_id char(10), sim3_id char(10), tokenizing_status int, PRIMARY KEY(id));
 tokenizing_status 0 : progress and *
@@ -14,7 +17,7 @@ tokenizing_status 2 : expired and complete tokenize
 word2vec_save_fname="petition_word2vec"
 
 def get_crawled_status(petition_id):
-	sql = "SELECT status FROM petition_crawled WHERE id = %s" # get crawled status
+	sql = "SELECT status FROM petition_crawled WHERE id = \"%s\"" # get crawled status
 	curs.execute(sql, petition_id)
 	crawled_status = curs.fetchone()
 
@@ -33,7 +36,7 @@ def update_tokenize(petition_id, petition_content, tokenizing_status):
 	token_content = twitter.morphs(petition_content)
 	token_content_str=' '.join(token_content).strip()
 
-	sql = "UPDATE simanalysis SET token = %s, tokenizing_status = %s where id = %s"
+	sql = "UPDATE simanalysis SET token = %s, tokenizing_status = %s where id = \"%s\""
 	#UPDATE simanalysis SET token = "ddjdjdjdkak", tokenizing_status = 0 where id = 21
 	
 	try:
@@ -54,6 +57,7 @@ def insert_tokenize(petition_id, petition_content, tokenizing_status):
 
 	sql = "INSERT INTO simanalysis (id, token, tokenizing_status) VALUES (%s, %s, %s)"
 	
+	#print(sql, (petition_id, token_content_str, tokenizing_status))
 	try:
 		curs.execute(sql, (petition_id, token_content_str, tokenizing_status))
 		conn.commit()
@@ -64,14 +68,43 @@ def insert_tokenize(petition_id, petition_content, tokenizing_status):
 
 
 def check_tokenizing_status(petition_id,petition_content):
-	sql = "SELECT tokenizing_status FROM simanalysis WHERE id = %s"
+	sql = "SELECT tokenizing_status FROM simanalysis WHERE id = \"%s\""
 	curs.execute(sql, petition_id)
 	tokenizing_status = curs.fetchone()
+
 
 	if tokenizing_status != None :
 		if tokenizing_status[0]==0:
 			update_tokenize(petition_id, petition_content,tokenizing_status)
 		elif tokenizing_status[0]==1:
+			return 1 #completed tokenize ,so nomore tokenizing
+	else :
+		insert_tokenize(petition_id, petition_content, tokenizing_status)
+
+
+def check_tokenizing_status_works(row):
+	petition_id = row[0]
+
+	if str(petition_id) == '170365':#becuase junk petition_id
+		print("170365 return")
+		return 0
+	petition_content = row[1]
+
+	try:
+		sql = "SELECT tokenizing_status FROM simanalysis WHERE id = \"%s\""
+		curs.execute(sql, petition_id)
+		tokenizing_status = curs.fetchone()
+	except:
+	    print("# select except!!")
+	    sys.exit() 
+
+	#print(tokenizing_status,petition_id)
+
+	if tokenizing_status != None :
+		if tokenizing_status[0]==0:
+			update_tokenize(petition_id, petition_content,tokenizing_status)
+		elif tokenizing_status[0]==1:
+			#print("ok",petition_id)
 			return 1 #completed tokenize ,so nomore tokenizing
 	else :
 		insert_tokenize(petition_id, petition_content, tokenizing_status)
@@ -85,10 +118,27 @@ def tokenize_crawled_db():
 	print("rowcount : ", curs.rowcount)
 	rows = curs.fetchall() # get all DB
 
+
+	batch_size=1000
+	start = 227000
+	end = 140000
+
+	'''
+	for idx in range(int(len(rows)/batch_size)+1):
+		start = end
+		end = start + batch_size
+		pool = multiprocessing.Pool(processes=1)
+		pool.map(check_tokenizing_status_works, rows[start:end])
+		pool.close()
+
+		print(start)
+	'''		
 	for idx, row in enumerate(rows):
-		petition_id = row[0]
-		petition_content = row[1]
-		check_tokenizing_status(petition_id,petition_content)
+		if idx <=  start:
+			continue
+
+		check_tokenizing_status_works(row)
+
 		if idx%1000 == 0:
 			print(idx)
 
